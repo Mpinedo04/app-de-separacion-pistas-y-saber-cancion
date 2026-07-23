@@ -1,0 +1,8 @@
+flask
+flask-cors
+audio-separator[cpu]
+shazamio
+
+# Para aceleración por GPU con tarjetas NVIDIA (CUDA):
+# Reemplaza audio-separator[cpu] por:
+# audio-separator[gpu]
