@@ -36,3 +36,11 @@ La aplicación se abrirá automáticamente en tu navegador web predeterminado en
 - **Separar Pistas**: Sube un archivo de video o audio. La aplicación lo procesará y te devolverá dos pistas separadas (instrumental y voces) en formato FLAC de alta calidad.
 - **Identificar Canción**: Sube un archivo y la aplicación usará la base de datos de Shazam para decirte qué canción está sonando.
 - **Streaming en tiempo real**: Reproduce las pistas directamente desde el navegador con soporte para desplazamiento de tiempo (*seeking*).
+- **Progreso real**: La barra muestra el avance y el tiempo restante estimado de la separación.
+- **No se pierden resultados**: Si recargas la página (o reinicias SoundForge) mientras separas, la página retoma la última separación y muestra el resultado al terminar. Las pistas se descargan con el nombre de la canción original, p. ej. `Mi canción (Voz).flac`.
+
+## Archivos y limpieza
+
+Los archivos subidos se guardan en `uploads/` y las pistas separadas en `output/`. Los archivos de más de 24 horas se borran automáticamente al arrancar y al subir un archivo nuevo.
+
+Si se lanzan varias separaciones a la vez, se procesan de una en una (la segunda queda "en cola") para no agotar la memoria.

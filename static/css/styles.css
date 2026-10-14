@@ -1109,3 +1109,22 @@
             color: var(--text-secondary);
             background: rgba(139, 92, 246, 0.05);
         }
+
+        /* ── FFmpeg missing warning ── */
+        .warning-banner {
+            margin: 0 auto 24px;
+            max-width: 900px;
+            padding: 14px 18px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--text-primary);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .warning-banner code {
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.08);
+        }

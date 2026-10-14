@@ -48,6 +48,13 @@
             <p class="subtitle">Herramientas de IA para Audio</p>
         </header>
 
+        {% if not ffmpeg_available %}
+        <div class="warning-banner">
+            ⚠️ No se encontró <strong>FFmpeg</strong>. La separación y la identificación fallarán.
+            Instálalo con <code>winget install Gyan.FFmpeg</code> o define la variable <code>FFMPEG_PATH</code> y reinicia SoundForge.
+        </div>
+        {% endif %}
+
         <!-- Cards Grid -->
         <div class="cards-grid">
 
