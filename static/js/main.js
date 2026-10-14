@@ -280,10 +280,12 @@
                 sepPercent.textContent = progress + '%';
                 if (data.status === 'queued') {
                     sepProgressText.textContent = 'En cola, esperando otra separación…';
-                } else if (data.eta_seconds != null) {
-                    sepProgressText.textContent = `Separando pistas… quedan ${formatDuration(data.eta_seconds)}`;
                 } else {
-                    sepProgressText.textContent = 'Separando pistas… (puede tardar varios minutos)';
+                    const device = { gpu: ' con la GPU', cpu: ' con la CPU' }[data.device] || '';
+                    const eta = data.eta_seconds != null
+                        ? `quedan ${formatDuration(data.eta_seconds)}`
+                        : '(puede tardar varios minutos)';
+                    sepProgressText.textContent = `Separando pistas${device}… ${eta}`;
                 }
 
                 if (data.status === 'complete') {

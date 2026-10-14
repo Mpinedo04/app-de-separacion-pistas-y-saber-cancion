@@ -2,6 +2,5 @@ flask
 audio-separator[cpu]
 shazamio
 
-# Para aceleración por GPU con tarjetas NVIDIA (CUDA):
-# Reemplaza audio-separator[cpu] por:
-# audio-separator[gpu]
+# Para aceleración por GPU con tarjetas NVIDIA (CUDA) hay que instalar
+# PyTorch con CUDA aparte: mira la sección "Aceleración por GPU" del README.

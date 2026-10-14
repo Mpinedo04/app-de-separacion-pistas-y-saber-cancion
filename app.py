@@ -186,7 +186,7 @@ def _summarize_error(lines: list[str]) -> str:
 
 
 def _handle_separator_line(line: str, task: dict, tail: list[str]):
-    """Update progress / ETA from one line of audio-separator output."""
+    """Update progress / ETA / device from one line of audio-separator output."""
     m = _PROGRESS_RE.search(line)
     if m:
         task["progress"] = min(int(m.group(1)), 99)
@@ -195,6 +195,10 @@ def _handle_separator_line(line: str, task: dict, tail: list[str]):
             h, mnt, s = eta.group(1), eta.group(2), eta.group(3)
             task["eta_seconds"] = int(h or 0) * 3600 + int(mnt) * 60 + int(s)
         return
+    if "setting Torch device to CUDA" in line:
+        task["device"] = "gpu"
+    elif "running in CPU mode" in line:
+        task["device"] = "cpu"
     tail.append(line + "\n")
     if len(tail) > 40:
         tail.pop(0)
@@ -382,6 +386,7 @@ def separate():
         "status": "queued",
         "progress": 0,
         "eta_seconds": None,
+        "device": None,
         "files": {s: "" for s in STEMS},
         "error": "",
         "source": str(source),
@@ -415,8 +420,11 @@ def task_status(task_id: str):
         "progress": task["progress"],
     }
 
-    if task["status"] == "processing" and task.get("eta_seconds") is not None:
-        resp["eta_seconds"] = task["eta_seconds"]
+    if task["status"] == "processing":
+        if task.get("eta_seconds") is not None:
+            resp["eta_seconds"] = task["eta_seconds"]
+        if task.get("device"):
+            resp["device"] = task["device"]
     elif task["status"] == "complete":
         # Return basenames so the client can use /download/ or /stream/
         resp["files"] = {s: os.path.basename(p) if p else "" for s, p in task["files"].items()}

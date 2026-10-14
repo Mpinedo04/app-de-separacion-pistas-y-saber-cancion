@@ -15,11 +15,14 @@ Abre una terminal y ejecuta el siguiente comando para instalar las dependencias 
 pip install -r requirements.txt
 ```
 
-> **Aceleración por GPU (Opcional):**
-> Si cuentas con una tarjeta gráfica NVIDIA y soporte CUDA, puedes obtener un rendimiento significativamente mayor instalando:
+> **Aceleración por GPU (Opcional, muy recomendable):**
+> Con una tarjeta NVIDIA la separación va unas 4–5 veces más rápida (p. ej. una canción de 8 min: ~33 min en CPU frente a ~7 min en una GTX 1650).
+> En Windows, `pip install torch` instala por defecto la versión **solo CPU**, así que hay que instalar la versión con CUDA a mano. Ajusta las versiones a las de tu `torch` actual (las disponibles están en https://download.pytorch.org/whl/torch/):
 > ```bash
-> pip install audio-separator[gpu]
+> pip install "torch==2.13.0+cu126" "torchvision==0.28.0+cu126" --index-url https://download.pytorch.org/whl/cu126
 > ```
+> Compruébalo con `python -c "import torch; print(torch.cuda.is_available())"`, que debe decir `True`. Mientras separa, la página indica si está usando la GPU o la CPU.
+> No uses `--use_autocast`: en las GTX 16xx la media precisión es unas 3 veces **más lenta**.
 
 ## Uso
 
