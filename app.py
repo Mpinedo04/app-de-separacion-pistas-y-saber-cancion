@@ -10,6 +10,7 @@ import glob
 import json
 import time
 import codecs
+import zipfile
 import uuid
 import shutil
 import asyncio
@@ -75,7 +76,32 @@ ALLOWED_EXTENSIONS = {
     ".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".flv", ".ts",
 }
 
-STEMS = ("vocals", "instrumental")
+VOCAL_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+MULTITRACK_MODEL = "htdemucs_6s.yaml"
+# Demucs averages several predictions with small time shifts; 2 is a good
+# quality/speed balance (each shift is a full pass over the song)
+DEMUCS_SHIFTS = 2
+
+# Stems produced by each mode, in the order the UI shows them.
+# "multitrack" first splits vocals with the Roformer (best vocal model), then
+# runs Demucs 6-stem on the instrumental to split the instruments.
+MODES = {
+    "vocals": ("vocals", "instrumental"),
+    "multitrack": ("vocals", "drums", "bass", "guitar", "piano", "other", "instrumental"),
+}
+# Share of the total time the vocal step takes in multitrack mode (an 8-min
+# song on a GTX 1650: ~7 min Roformer vs ~1.2 min Demucs)
+MULTITRACK_VOCAL_SHARE = 0.85
+
+STEM_LABELS = {
+    "vocals": "Voz",
+    "instrumental": "Instrumental",
+    "drums": "Batería",
+    "bass": "Bajo",
+    "guitar": "Guitarra",
+    "piano": "Piano",
+    "other": "Otros",
+}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
@@ -142,20 +168,31 @@ def _meta_path(task_id: str) -> Path:
     return OUTPUT_DIR / f"{task_id}.json"
 
 
+def _ordered_files(task_id: str, mode: str) -> dict[str, str]:
+    """{stem: path} of the outputs that exist, in display order."""
+    return {
+        stem: str(_output_path(task_id, stem))
+        for stem in MODES.get(mode, MODES["vocals"])
+        if _output_path(task_id, stem).is_file()
+    }
+
+
 def _task_from_disk(task_id: str) -> dict | None:
     """Rebuild a finished task from its files (e.g. after a server restart)."""
-    files = {s: str(_output_path(task_id, s)) for s in STEMS if _output_path(task_id, s).is_file()}
-    if not files:
-        return None
     meta = {}
     try:
         meta = json.loads(_meta_path(task_id).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
+    mode = meta.get("mode", "vocals")
+    files = _ordered_files(task_id, mode)
+    if not files:
+        return None
     return {
         "status": "complete",
         "progress": 100,
-        "files": {s: files.get(s, "") for s in STEMS},
+        "mode": mode,
+        "files": files,
         "error": "",
         "source": meta.get("source", ""),
         "original_name": meta.get("original_name", ""),
@@ -163,11 +200,9 @@ def _task_from_disk(task_id: str) -> dict | None:
 
 
 _PROGRESS_RE = re.compile(r"(\d+)%\|")
-# Remaining time inside a tqdm bar: "[01:10<02:20," or "[1:01:10<1:02:20,"
-_ETA_RE = re.compile(r"<(?:(\d+):)?(\d+):(\d+)")
-_ERROR_LINE_RE =re.compile(r"(error|exception|not found|no such|failed)", re.I)
-
-
+# Elapsed and remaining time inside a tqdm bar: "[01:10<02:20," or "[1:01:10<1:02:20,"
+_TIMES_RE = re.compile(r"\[(?:(\d+):)?(\d+):(\d+)<(?:(\d+):)?(\d+):(\d+)")
+_ERROR_LINE_RE = re.compile(r"(error|exception|not found|no such|failed)", re.I)
 # audio-separator log prefix: "2026-01-01 10:00:00.000 - ERROR - separator - "
 _LOG_PREFIX_RE = re.compile(r"^\S+ \S+ - (\w+) - \w+ - ")
 
@@ -181,19 +216,43 @@ def _summarize_error(lines: list[str]) -> str:
     candidates = logged_errors or [l for l in meaningful if _ERROR_LINE_RE.search(l)] or meaningful
     line = _LOG_PREFIX_RE.sub("", candidates[-1])
     # Full upload paths are noise for the user
-    line = line.replace(str(UPLOAD_DIR) + os.sep, "")
+    line = line.replace(str(UPLOAD_DIR) + os.sep, "").replace(str(OUTPUT_DIR) + os.sep, "")
     return line[-300:]
 
 
-def _handle_separator_line(line: str, task: dict, tail: list[str]):
+def _seconds(h, m, s) -> int:
+    return int(h or 0) * 3600 + int(m) * 60 + int(s)
+
+
+class _StepProgress:
+    """Maps the tqdm bars of one separator run onto a slice of the overall
+    progress. A run may print several bars in a row (Demucs does one per
+    shift), so a bar restarting at a lower percentage counts as the next pass."""
+
+    def __init__(self, task: dict, start: float, span: float, passes: int):
+        self.task, self.start, self.span, self.passes = task, start, span, passes
+        self.done_passes = 0
+        self.last_pct = 0
+
+    def update(self, line: str, pct: int):
+        if pct < self.last_pct:
+            self.done_passes += 1
+        self.last_pct = pct
+        fraction = min(1.0, (self.done_passes + pct / 100) / self.passes)
+        self.task["progress"] = min(int(self.start + self.span * fraction), 99)
+        times = _TIMES_RE.search(line)
+        if times:
+            elapsed = _seconds(*times.group(1, 2, 3))
+            remaining = _seconds(*times.group(4, 5, 6))
+            passes_left = max(0, self.passes - self.done_passes - 1)
+            self.task["eta_seconds"] = remaining + passes_left * (elapsed + remaining)
+
+
+def _handle_separator_line(line: str, task: dict, step: _StepProgress, tail: list[str]):
     """Update progress / ETA / device from one line of audio-separator output."""
     m = _PROGRESS_RE.search(line)
     if m:
-        task["progress"] = min(int(m.group(1)), 99)
-        eta = _ETA_RE.search(line)
-        if eta:
-            h, mnt, s = eta.group(1), eta.group(2), eta.group(3)
-            task["eta_seconds"] = int(h or 0) * 3600 + int(mnt) * 60 + int(s)
+        step.update(line, int(m.group(1)))
         return
     if "setting Torch device to CUDA" in line:
         task["device"] = "gpu"
@@ -202,6 +261,52 @@ def _handle_separator_line(line: str, task: dict, tail: list[str]):
     tail.append(line + "\n")
     if len(tail) > 40:
         tail.pop(0)
+
+
+def _run_separator(input_path: str, model: str, custom_names: dict, extra_args: list[str],
+                   task: dict, step: _StepProgress, tail: list[str]) -> int:
+    """Run the audio-separator CLI once and return its exit code."""
+    # Run the CLI with this same interpreter so it works even when the
+    # Scripts folder is not in PATH
+    cmd = [
+        sys.executable, "-c",
+        "from audio_separator.utils.cli import main; main()",
+        input_path,
+        "--model_filename", model,
+        "--output_dir", str(OUTPUT_DIR),
+        "--output_format", "FLAC",
+        "--custom_output_names", json.dumps(custom_names),
+        *extra_args,
+    ]
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+    # tqdm writes "\r 50%|###  | 1/2 [00:35<00:35, ...]" with the \r
+    # *before* each update, so a line-based reader would only see each
+    # update when the next one arrives. Read raw chunks and split on
+    # \r and \n ourselves to get progress in real time.
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    pending = ""
+    while True:
+        chunk = proc.stdout.read1(4096)  # type: ignore[union-attr]
+        if not chunk:
+            break
+        pending += decoder.decode(chunk)
+        *lines, pending = re.split(r"[\r\n]", pending)
+        for line in lines:
+            if line.strip():
+                _handle_separator_line(line, task, step, tail)
+    if pending.strip():
+        _handle_separator_line(pending, task, step, tail)
+
+    return proc.wait()
 
 
 def _find_fallback_output(stem_name: str, upload_stem: str) -> Path | None:
@@ -214,82 +319,77 @@ def _find_fallback_output(stem_name: str, upload_stem: str) -> Path | None:
     return None
 
 
+class _SeparationError(Exception):
+    pass
+
+
+def _separate_vocals(filepath: str, task_id: str, task: dict, span: float, tail: list[str]):
+    """Step 1: vocals / instrumental with the Roformer."""
+    names = {"Vocals": f"{task_id}_vocals", "Instrumental": f"{task_id}_instrumental"}
+    step = _StepProgress(task, 0, span, passes=1)
+    if _run_separator(filepath, VOCAL_MODEL, names, [], task, step, tail) != 0:
+        raise _SeparationError(_summarize_error(tail))
+
+    upload_stem = Path(filepath).stem
+    for stem in ("vocals", "instrumental"):
+        out = _output_path(task_id, stem)
+        if not out.is_file():
+            fallback = _find_fallback_output(stem, upload_stem)
+            if fallback:
+                fallback.replace(out)
+
+    if not any(_output_path(task_id, s).is_file() for s in ("vocals", "instrumental")):
+        raise _SeparationError(
+            "No se generaron pistas. ¿El archivo está dañado o no contiene audio? "
+            f"Detalle: {_summarize_error(tail)}"
+        )
+
+
+def _separate_instruments(task_id: str, task: dict, start: float, tail: list[str]):
+    """Step 2: split the instrumental into drums / bass / guitar / piano / other."""
+    instrumental = _output_path(task_id, "instrumental")
+    if not instrumental.is_file():
+        raise _SeparationError("Falta la pista instrumental para separar los instrumentos")
+
+    # Demucs also outputs a "vocals" stem; on an instrumental it is just
+    # leftovers, so it is written to a scratch name and deleted
+    residue = f"{task_id}_residue"
+    names = {s.capitalize(): f"{task_id}_{s}" for s in ("drums", "bass", "guitar", "piano", "other")}
+    names["Vocals"] = residue
+    step = _StepProgress(task, start, 100 - start, passes=DEMUCS_SHIFTS)
+    extra = ["--demucs_shifts", str(DEMUCS_SHIFTS)]
+    try:
+        if _run_separator(str(instrumental), MULTITRACK_MODEL, names, extra, task, step, tail) != 0:
+            raise _SeparationError(_summarize_error(tail))
+    finally:
+        (OUTPUT_DIR / f"{residue}.flac").unlink(missing_ok=True)
+
+
 def _run_separation(filepath: str, task_id: str):
-    """Run audio-separator in a subprocess and update `tasks` dict."""
+    """Run the separation steps for the task's mode and update `tasks`."""
     task = tasks[task_id]
     tail: list[str] = []
+    multitrack = task["mode"] == "multitrack"
     try:
         with separation_lock:
             task["status"] = "processing"
+            vocal_span = MULTITRACK_VOCAL_SHARE * 100 if multitrack else 100
 
-            custom_names = {"Vocals": f"{task_id}_vocals", "Instrumental": f"{task_id}_instrumental"}
-            # Run the CLI with this same interpreter so it works even when the
-            # Scripts folder is not in PATH
-            cmd = [
-                sys.executable, "-c",
-                "from audio_separator.utils.cli import main; main()",
-                filepath,
-                "--output_dir", str(OUTPUT_DIR),
-                "--output_format", "FLAC",
-                "--custom_output_names", json.dumps(custom_names),
-            ]
-            env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+            task["step"] = 1
+            _separate_vocals(filepath, task_id, task, vocal_span, tail)
 
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            if multitrack:
+                task.update(step=2, eta_seconds=None)
+                _separate_instruments(task_id, task, vocal_span, tail)
 
-            # tqdm writes "\r 50%|###  | 1/2 [00:35<00:35, ...]" with the \r
-            # *before* each update, so a line-based reader would only see each
-            # update when the next one arrives. Read raw chunks and split on
-            # \r and \n ourselves to get progress in real time.
-            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-            pending = ""
-            while True:
-                chunk = proc.stdout.read1(4096)  # type: ignore[union-attr]
-                if not chunk:
-                    break
-                pending += decoder.decode(chunk)
-                *lines, pending = re.split(r"[\r\n]", pending)
-                for line in lines:
-                    if line.strip():
-                        _handle_separator_line(line, task, tail)
-            if pending.strip():
-                _handle_separator_line(pending, task, tail)
-
-            proc.wait()
-
-        if proc.returncode != 0:
-            print(f"[separate {task_id}] audio-separator failed:\n{''.join(tail)}", file=sys.stderr)
-            task["status"] = "error"
-            task["error"] = _summarize_error(tail)
-            return
-
-        upload_stem = Path(filepath).stem
-        for stem in STEMS:
-            out = _output_path(task_id, stem)
-            if not out.is_file():
-                fallback = _find_fallback_output(stem, upload_stem)
-                if fallback:
-                    fallback.replace(out)
-            task["files"][stem] = str(out) if out.is_file() else ""
-
-        if not any(task["files"].values()):
-            print(f"[separate {task_id}] no output files:\n{''.join(tail)}", file=sys.stderr)
-            task["status"] = "error"
-            task["error"] = (
-                "No se generaron pistas. ¿El archivo está dañado o no contiene audio? "
-                f"Detalle: {_summarize_error(tail)}"
-            )
-            return
-
+        task["files"] = _ordered_files(task_id, task["mode"])
         task["status"] = "complete"
         task["progress"] = 100
 
+    except _SeparationError as exc:
+        print(f"[separate {task_id}] failed:\n{''.join(tail)}", file=sys.stderr)
+        task["status"] = "error"
+        task["error"] = str(exc)
     except FileNotFoundError as exc:
         task["status"] = "error"
         task["error"] = f"No se pudo ejecutar el separador: {exc}"
@@ -379,22 +479,28 @@ def separate():
     if source is None:
         return _error("Archivo no encontrado en el servidor", 404)
 
+    mode = data.get("mode") or "vocals"
+    if mode not in MODES:
+        return _error("Modo de separación no válido", 400)
+
     task_id = uuid.uuid4().hex
     original_name = str(data.get("original_name") or source.name)
     # Register the task before the thread starts so /status never sees an unknown id
     tasks[task_id] = {
         "status": "queued",
         "progress": 0,
+        "mode": mode,
+        "step": 0,
         "eta_seconds": None,
         "device": None,
-        "files": {s: "" for s in STEMS},
+        "files": {},
         "error": "",
         "source": str(source),
         "original_name": original_name,
     }
     try:
         _meta_path(task_id).write_text(
-            json.dumps({"source": source.name, "original_name": original_name}),
+            json.dumps({"source": source.name, "original_name": original_name, "mode": mode}),
             encoding="utf-8",
         )
     except OSError:
@@ -406,9 +512,13 @@ def separate():
     return jsonify({"task_id": task_id, "status": "queued"})
 
 
+def _valid_task_id(task_id: str) -> bool:
+    return re.fullmatch(r"[0-9a-f]{32}", task_id) is not None
+
+
 @app.route("/status/<task_id>", methods=["GET"])
 def task_status(task_id: str):
-    if not re.fullmatch(r"[0-9a-f]{32}", task_id):
+    if not _valid_task_id(task_id):
         return _error("ID de tarea no válido", 400)
 
     task = tasks.get(task_id) or _task_from_disk(task_id)
@@ -418,16 +528,19 @@ def task_status(task_id: str):
     resp: dict = {
         "status": task["status"],
         "progress": task["progress"],
+        "mode": task["mode"],
     }
 
     if task["status"] == "processing":
+        resp["step"] = task.get("step", 1)
+        resp["steps"] = 2 if task["mode"] == "multitrack" else 1
         if task.get("eta_seconds") is not None:
             resp["eta_seconds"] = task["eta_seconds"]
         if task.get("device"):
             resp["device"] = task["device"]
     elif task["status"] == "complete":
         # Return basenames so the client can use /download/ or /stream/
-        resp["files"] = {s: os.path.basename(p) if p else "" for s, p in task["files"].items()}
+        resp["files"] = {s: os.path.basename(p) for s, p in task["files"].items()}
         resp["source"] = os.path.basename(task["source"])
         resp["original_name"] = task["original_name"]
     elif task["status"] == "error":
@@ -546,6 +659,31 @@ def stream(filename: str):
     if fpath is None:
         return _error("Archivo no encontrado", 404)
     return send_from_directory(OUTPUT_DIR, fpath.name, conditional=True)
+
+
+@app.route("/download-all/<task_id>")
+def download_all(task_id: str):
+    """All the stems of a finished task in one ZIP (handy for a DAW)."""
+    if not _valid_task_id(task_id):
+        return _error("ID de tarea no válido", 400)
+    task = tasks.get(task_id) or _task_from_disk(task_id)
+    if task is None or task["status"] != "complete" or not task["files"]:
+        return _error("No hay pistas para descargar", 404)
+
+    base = _download_name(request.args.get("name"), "pistas")
+    zip_path = OUTPUT_DIR / f"{task_id}.zip"
+    if not zip_path.is_file():
+        tmp = zip_path.with_suffix(".zip.tmp")
+        # FLAC is already compressed: store, don't deflate
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as zf:
+            for stem, path in task["files"].items():
+                if os.path.isfile(path):
+                    zf.write(path, f"{base} - {STEM_LABELS.get(stem, stem)}.flac")
+        tmp.replace(zip_path)
+
+    return send_from_directory(
+        OUTPUT_DIR, zip_path.name, as_attachment=True, download_name=f"{base} (pistas).zip"
+    )
 
 
 # ---------------------------------------------------------------------------

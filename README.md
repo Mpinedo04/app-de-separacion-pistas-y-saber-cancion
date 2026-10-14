@@ -36,7 +36,10 @@ La aplicación se abrirá automáticamente en tu navegador web predeterminado en
 
 ## Funcionalidades
 
-- **Separar Pistas**: Sube un archivo de video o audio. La aplicación lo procesará y te devolverá dos pistas separadas (instrumental y voces) en formato FLAC de alta calidad.
+- **Separar Pistas**: Sube un archivo de video o audio y elige el modo:
+  - **Voz + Instrumental**: dos pistas en FLAC con el modelo BS-Roformer.
+  - **Multipista**: seis pistas (voz, batería, bajo, guitarra, piano y otros). Primero saca la voz con el Roformer (el mejor modelo para voz) y luego divide el instrumental con Demucs v4 (`htdemucs_6s`). Voz, batería y bajo salen muy limpios; guitarra y piano son más irregulares y lo que no encaja va a "otros". En una GTX 1650, una canción de 8 min tarda unos 8–9 min.
+- **Mezclador**: todas las pistas suenan sincronizadas con un único play y barra de tiempo. Cada pista tiene silenciar (M), solo (S), volumen y descarga, y puedes bajarlo todo en un ZIP para llevarlo a tu DAW.
 - **Identificar Canción**: Sube un archivo y la aplicación usará la base de datos de Shazam para decirte qué canción está sonando.
 - **Streaming en tiempo real**: Reproduce las pistas directamente desde el navegador con soporte para desplazamiento de tiempo (*seeking*).
 - **Progreso real**: La barra muestra el avance y el tiempo restante estimado de la separación.

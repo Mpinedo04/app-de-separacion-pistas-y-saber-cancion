@@ -97,6 +97,18 @@
                     <button class="file-remove" id="sepFileRemove" title="Quitar archivo">✕</button>
                 </div>
 
+                <!-- Mode -->
+                <div class="mode-picker" id="sepModePicker" role="radiogroup" aria-label="Tipo de separación">
+                    <button type="button" class="mode-option active" data-mode="vocals" role="radio" aria-checked="true">
+                        <span class="mode-title">🎤 Voz + Instrumental</span>
+                        <span class="mode-desc">2 pistas · la más rápida</span>
+                    </button>
+                    <button type="button" class="mode-option" data-mode="multitrack" role="radio" aria-checked="false">
+                        <span class="mode-title">🎛️ Multipista</span>
+                        <span class="mode-desc">Voz, batería, bajo, guitarra, piano y otros</span>
+                    </button>
+                </div>
+
                 <!-- Separate Button -->
                 <button class="btn btn-primary" id="sepBtn" disabled>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -118,23 +130,34 @@
 
                 <!-- Results -->
                 <div class="results-container" id="sepResults">
-                    <!-- Instrumental -->
+                    <div class="result-card mixer">
+                        <!-- Transport: one play/seek for all stems -->
+                        <div class="mixer-transport">
+                            <button type="button" class="mixer-play" id="mixerPlay" aria-label="Reproducir" disabled>
+                                <svg class="icon-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+                                <svg class="icon-pause" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1"></rect><rect x="14" y="4" width="5" height="16" rx="1"></rect></svg>
+                            </button>
+                            <span class="mixer-time" id="mixerTime">0:00</span>
+                            <input type="range" class="mixer-seek" id="mixerSeek" min="0" max="0" step="0.01" value="0" aria-label="Posición" disabled>
+                            <span class="mixer-time" id="mixerDuration">0:00</span>
+                        </div>
+                        <div class="mixer-tracks" id="mixerTracks"></div>
+                        <p class="mixer-hint"><strong>M</strong> silencia una pista · <strong>S</strong> escucha solo esa</p>
+                    </div>
+
                     <div class="result-card">
-                        <div class="result-card-header">
-                            <span class="result-emoji">🎵</span>
-                            <span class="result-label">Instrumental</span>
-                        </div>
-                        <div class="audio-player-wrapper">
-                            <audio controls id="instrumentalPlayer"></audio>
-                        </div>
                         <div class="result-actions">
-                            <a class="btn btn-download" id="downloadInstrumental" href="#" download>
+                            <a class="btn btn-download" id="downloadAll" href="#">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                                Descargar
+                                Descargar todo (ZIP)
+                            </a>
+                            <a class="btn btn-download hidden" id="downloadInstrumentalFull" href="#">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Instrumental completo
                             </a>
                             <button class="btn btn-identify-inline" id="identifyFromSep">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                                Identificar
+                                Identificar canción
                             </button>
                         </div>
                         <!-- Inline identify result -->
@@ -151,23 +174,6 @@
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Vocals -->
-                    <div class="result-card">
-                        <div class="result-card-header">
-                            <span class="result-emoji">🎤</span>
-                            <span class="result-label">Voces</span>
-                        </div>
-                        <div class="audio-player-wrapper">
-                            <audio controls id="vocalsPlayer"></audio>
-                        </div>
-                        <div class="result-actions">
-                            <a class="btn btn-download" id="downloadVocals" href="#" download>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                                Descargar
-                            </a>
                         </div>
                     </div>
                 </div>

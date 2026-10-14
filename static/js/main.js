@@ -177,6 +177,7 @@
         const sepFileName = document.getElementById('sepFileName');
         const sepFileSize = document.getElementById('sepFileSize');
         const sepFileRemove = document.getElementById('sepFileRemove');
+        const sepModePicker = document.getElementById('sepModePicker');
         const sepBtn = document.getElementById('sepBtn');
         const sepProgress = document.getElementById('sepProgress');
         const sepProgressText = sepProgress.querySelector('.progress-text');
@@ -185,6 +186,30 @@
         const sepResults = document.getElementById('sepResults');
         const sepLoading = document.getElementById('separateLoading');
         const sepReset = document.getElementById('sepReset');
+
+        // Display names; keep keys in sync with MODES in app.py
+        const STEM_INFO = {
+            vocals: { label: 'Voz', emoji: '🎤' },
+            drums: { label: 'Batería', emoji: '🥁' },
+            bass: { label: 'Bajo', emoji: '🔊' },
+            guitar: { label: 'Guitarra', emoji: '🎸' },
+            piano: { label: 'Piano', emoji: '🎹' },
+            other: { label: 'Otros', emoji: '🎶' },
+            instrumental: { label: 'Instrumental', emoji: '🎵' },
+        };
+
+        let sepMode = 'vocals';
+
+        sepModePicker.querySelectorAll('.mode-option').forEach(option => {
+            option.addEventListener('click', () => {
+                sepMode = option.dataset.mode;
+                sepModePicker.querySelectorAll('.mode-option').forEach(o => {
+                    const active = o === option;
+                    o.classList.toggle('active', active);
+                    o.setAttribute('aria-checked', String(active));
+                });
+            });
+        });
 
         setupDropzone(sepDropzone, sepFileInput, (file) => {
             const problem = validateFile(file);
@@ -213,6 +238,7 @@
             sepProgress.classList.add('visible');
             sepDropzone.style.display = 'none';
             sepFileInfo.style.display = 'none';
+            sepModePicker.style.display = 'none';
         }
 
         sepBtn.addEventListener('click', async () => {
@@ -238,7 +264,11 @@
                 const sepData = await apiFetch('/separate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filename: uploadData.filename, original_name: sepFile.name })
+                    body: JSON.stringify({
+                        filename: uploadData.filename,
+                        original_name: sepFile.name,
+                        mode: sepMode,
+                    })
                 }, 'Error al iniciar la separación');
 
                 sepTaskId = sepData.task_id;
@@ -252,6 +282,19 @@
                 resetSeparation({ keepFile: true });
             }
         });
+
+        function progressMessage(data) {
+            if (data.status === 'queued') return 'En cola, esperando otra separación…';
+            const device = { gpu: ' con la GPU', cpu: ' con la CPU' }[data.device] || '';
+            const eta = data.eta_seconds != null
+                ? `quedan ${formatDuration(data.eta_seconds)}`
+                : '(puede tardar varios minutos)';
+            if (data.steps === 2) {
+                const what = data.step === 2 ? 'separando instrumentos' : 'separando la voz';
+                return `Paso ${data.step || 1} de 2: ${what}${device}… ${eta}`;
+            }
+            return `Separando pistas${device}… ${eta}`;
+        }
 
         function pollSeparationStatus(networkFailures = 0) {
             // setTimeout chain instead of setInterval so slow responses never overlap
@@ -278,15 +321,7 @@
                 const progress = data.progress || 0;
                 sepProgressFill.style.width = progress + '%';
                 sepPercent.textContent = progress + '%';
-                if (data.status === 'queued') {
-                    sepProgressText.textContent = 'En cola, esperando otra separación…';
-                } else {
-                    const device = { gpu: ' con la GPU', cpu: ' con la CPU' }[data.device] || '';
-                    const eta = data.eta_seconds != null
-                        ? `quedan ${formatDuration(data.eta_seconds)}`
-                        : '(puede tardar varios minutos)';
-                    sepProgressText.textContent = `Separando pistas${device}… ${eta}`;
-                }
+                sepProgressText.textContent = progressMessage(data);
 
                 if (data.status === 'complete') {
                     showSeparationResults(data);
@@ -301,35 +336,233 @@
             }, 1000);
         }
 
-        function setupResult(stem, file, downloadLabel, originalStem) {
-            const player = document.getElementById(`${stem}Player`);
-            const link = document.getElementById(`download${stem[0].toUpperCase()}${stem.slice(1)}`);
-            const card = player.closest('.result-card');
-            if (!file) {
-                card.style.display = 'none';
-                return false;
-            }
-            card.style.display = '';
-            const encoded = encodeURIComponent(file);
-            const ext = file.slice(file.lastIndexOf('.'));
-            const niceName = `${originalStem} (${downloadLabel})${ext}`;
-            player.src = `/stream/${encoded}`;
-            link.href = `/download/${encoded}?name=${encodeURIComponent(niceName)}`;
-            return true;
+        /* ═══════════════════════════════════════════
+           MIXER — plays every stem in sync
+           ═══════════════════════════════════════════ */
+        const mixerPlay = document.getElementById('mixerPlay');
+        const mixerSeek = document.getElementById('mixerSeek');
+        const mixerTime = document.getElementById('mixerTime');
+        const mixerDuration = document.getElementById('mixerDuration');
+        const mixerTracks = document.getElementById('mixerTracks');
+
+        // Stems drift apart slightly when played as separate <audio> elements;
+        // re-align any that is further than this from the master track
+        const MAX_DRIFT_SECONDS = 0.08;
+
+        let tracks = [];          // [{ stem, audio, row, muted, solo }]
+        let mixerTimer = null;
+        let mixerSeeking = false;
+
+        const master = () => tracks[0] && tracks[0].audio;
+
+        function formatClock(seconds) {
+            if (!isFinite(seconds)) return '0:00';
+            const s = Math.floor(seconds);
+            return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
         }
+
+        function downloadUrl(file, originalStem, label) {
+            const ext = file.slice(file.lastIndexOf('.'));
+            const niceName = `${originalStem} (${label})${ext}`;
+            return `/download/${encodeURIComponent(file)}?name=${encodeURIComponent(niceName)}`;
+        }
+
+        function applyMuting() {
+            const anySolo = tracks.some(t => t.solo);
+            tracks.forEach(t => {
+                const silent = anySolo ? !t.solo : t.muted;
+                t.audio.muted = silent;
+                t.row.classList.toggle('silent', silent);
+            });
+        }
+
+        function makeTrackRow(track, file, originalStem) {
+            const info = STEM_INFO[track.stem] || { label: track.stem, emoji: '🎵' };
+            const row = document.createElement('div');
+            row.className = 'mixer-track';
+
+            const name = document.createElement('div');
+            name.className = 'track-name';
+            const emoji = document.createElement('span');
+            emoji.textContent = info.emoji;
+            const label = document.createElement('span');
+            label.textContent = info.label;
+            name.append(emoji, label);
+
+            const toggle = (cls, text, title, key) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `track-btn ${cls}`;
+                btn.textContent = text;
+                btn.title = `${title}: ${info.label}`;
+                btn.setAttribute('aria-pressed', 'false');
+                btn.addEventListener('click', () => {
+                    track[key] = !track[key];
+                    btn.setAttribute('aria-pressed', String(track[key]));
+                    applyMuting();
+                });
+                return btn;
+            };
+
+            const volume = document.createElement('input');
+            volume.type = 'range';
+            volume.className = 'track-volume';
+            volume.min = '0';
+            volume.max = '1';
+            volume.step = '0.01';
+            volume.value = '1';
+            volume.setAttribute('aria-label', `Volumen de ${info.label}`);
+            volume.addEventListener('input', () => { track.audio.volume = Number(volume.value); });
+
+            const download = document.createElement('a');
+            download.className = 'track-download';
+            download.href = downloadUrl(file, originalStem, info.label);
+            download.title = `Descargar ${info.label}`;
+            download.setAttribute('aria-label', `Descargar ${info.label}`);
+            download.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+
+            row.append(name, toggle('mute', 'M', 'Silenciar', 'muted'),
+                toggle('solo', 'S', 'Solo', 'solo'), volume, download);
+            return row;
+        }
+
+        function buildMixer(stemFiles, originalStem) {
+            destroyMixer();
+            tracks = stemFiles.map(([stem, file]) => {
+                const audio = new Audio();
+                audio.preload = 'auto';
+                audio.src = `/stream/${encodeURIComponent(file)}`;
+                const track = { stem, audio, muted: false, solo: false };
+                track.row = makeTrackRow(track, file, originalStem);
+                mixerTracks.appendChild(track.row);
+                return track;
+            });
+
+            const m = master();
+            if (!m) return;
+            m.addEventListener('loadedmetadata', () => {
+                mixerSeek.max = String(m.duration);
+                mixerDuration.textContent = formatClock(m.duration);
+                mixerSeek.disabled = false;
+                mixerPlay.disabled = false;
+            });
+            m.addEventListener('ended', () => {
+                pauseAll();
+                seekAll(0);
+            });
+        }
+
+        function syncTick() {
+            const m = master();
+            if (!m) return;
+            if (!mixerSeeking) {
+                mixerSeek.value = String(m.currentTime);
+                mixerTime.textContent = formatClock(m.currentTime);
+            }
+            if (m.paused) return;
+            tracks.slice(1).forEach(t => {
+                if (!t.audio.ended && Math.abs(t.audio.currentTime - m.currentTime) > MAX_DRIFT_SECONDS) {
+                    t.audio.currentTime = m.currentTime;
+                }
+            });
+        }
+
+        async function playAll() {
+            const m = master();
+            if (!m) return;
+            tracks.forEach(t => { t.audio.currentTime = m.currentTime; });
+            try {
+                await Promise.all(tracks.map(t => t.audio.play()));
+            } catch {
+                pauseAll();
+                showToast('No se pudo reproducir el audio');
+                return;
+            }
+            mixerPlay.classList.add('playing');
+            mixerPlay.setAttribute('aria-label', 'Pausar');
+            clearInterval(mixerTimer);
+            mixerTimer = setInterval(syncTick, 250);
+        }
+
+        function pauseAll() {
+            tracks.forEach(t => t.audio.pause());
+            mixerPlay.classList.remove('playing');
+            mixerPlay.setAttribute('aria-label', 'Reproducir');
+            clearInterval(mixerTimer);
+            mixerTimer = null;
+            syncTick();
+        }
+
+        function seekAll(seconds) {
+            tracks.forEach(t => { t.audio.currentTime = seconds; });
+            mixerTime.textContent = formatClock(seconds);
+            mixerSeek.value = String(seconds);
+        }
+
+        function destroyMixer() {
+            pauseAll();
+            tracks.forEach(t => {
+                t.audio.removeAttribute('src');
+                t.audio.load();
+            });
+            tracks = [];
+            mixerTracks.replaceChildren();
+            mixerSeek.value = '0';
+            mixerSeek.max = '0';
+            mixerSeek.disabled = true;
+            mixerPlay.disabled = true;
+            mixerTime.textContent = '0:00';
+            mixerDuration.textContent = '0:00';
+        }
+
+        mixerPlay.addEventListener('click', () => {
+            const m = master();
+            if (!m) return;
+            if (m.paused) playAll(); else pauseAll();
+        });
+
+        mixerSeek.addEventListener('input', () => {
+            mixerSeeking = true;
+            mixerTime.textContent = formatClock(Number(mixerSeek.value));
+        });
+
+        mixerSeek.addEventListener('change', () => {
+            mixerSeeking = false;
+            seekAll(Number(mixerSeek.value));
+        });
 
         function showSeparationResults(data) {
             sepProgress.classList.remove('visible');
             sepBtn.style.display = 'none';
             sepDropzone.style.display = 'none';
             sepFileInfo.style.display = 'none';
+            sepModePicker.style.display = 'none';
 
             const originalStem = stemName(data.original_name || 'pista');
             const files = data.files || {};
-            const hasInstrumental = setupResult('instrumental', files.instrumental, 'Instrumental', originalStem);
-            const hasVocals = setupResult('vocals', files.vocals, 'Voz', originalStem);
-            if (!hasInstrumental || !hasVocals) {
-                showToast('El separador solo generó una de las dos pistas');
+            const multitrack = data.mode === 'multitrack';
+
+            // In multitrack mode the instrumental is the sum of the instrument
+            // stems, so it is offered as a download instead of a mixer track.
+            // Flask sorts JSON keys alphabetically, so order by STEM_INFO.
+            const order = Object.keys(STEM_INFO);
+            const rank = stem => (order.includes(stem) ? order.indexOf(stem) : order.length);
+            const mixerStems = Object.entries(files)
+                .filter(([stem, file]) => file && !(multitrack && stem === 'instrumental'))
+                .sort(([a], [b]) => rank(a) - rank(b));
+            buildMixer(mixerStems, originalStem);
+
+            const expected = multitrack ? 6 : 2;
+            if (mixerStems.length < expected) {
+                showToast('El separador no generó todas las pistas');
+            }
+
+            document.getElementById('downloadAll').href =
+                `/download-all/${sepTaskId}?name=${encodeURIComponent(originalStem)}`;
+            const instrumentalLink = document.getElementById('downloadInstrumentalFull');
+            instrumentalLink.classList.toggle('hidden', !(multitrack && files.instrumental));
+            if (multitrack && files.instrumental) {
+                instrumentalLink.href = downloadUrl(files.instrumental, originalStem, 'Instrumental');
             }
 
             // Identify with the original mix (Shazam recognises it far better than
@@ -393,15 +626,10 @@
             sepReset.classList.remove('visible');
             sepDropzone.style.display = '';
             sepFileInfo.style.display = '';
+            sepModePicker.style.display = '';
             document.getElementById('inlineIdentifyResult').classList.remove('visible');
 
-            // Stop audio
-            ['instrumentalPlayer', 'vocalsPlayer'].forEach(id => {
-                const player = document.getElementById(id);
-                player.pause();
-                player.removeAttribute('src');
-                player.load();
-            });
+            destroyMixer();
         }
 
         // Resume the last separation after a page reload (it keeps running on the server)
