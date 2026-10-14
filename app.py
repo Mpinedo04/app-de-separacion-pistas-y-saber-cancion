@@ -11,6 +11,7 @@ import json
 import time
 import codecs
 import zipfile
+import mimetypes
 import uuid
 import shutil
 import asyncio
@@ -102,6 +103,10 @@ STEM_LABELS = {
     "piano": "Piano",
     "other": "Otros",
 }
+
+# The Windows registry sometimes maps .js to text/plain, which makes browsers
+# refuse to run the page's ES modules
+mimetypes.add_type("text/javascript", ".js")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
@@ -373,6 +378,7 @@ def _run_separation(filepath: str, task_id: str):
     try:
         with separation_lock:
             task["status"] = "processing"
+            task["started_at"] = time.time()
             vocal_span = MULTITRACK_VOCAL_SHARE * 100 if multitrack else 100
 
             task["step"] = 1
@@ -396,6 +402,35 @@ def _run_separation(filepath: str, task_id: str):
     except Exception as exc:
         task["status"] = "error"
         task["error"] = str(exc)
+
+
+_system_info = {"gpu": "", "checked": False}
+_system_probe_started = threading.Lock()
+
+
+def _probe_gpu():
+    """Ask PyTorch (in a subprocess, so Flask never loads it) which GPU the
+    separator will use. Takes a few seconds, so it runs in the background."""
+    code = (
+        "import torch\n"
+        "print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+    )
+    try:
+        out = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True, timeout=180,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        _system_info["gpu"] = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else ""
+    except Exception:
+        _system_info["gpu"] = ""
+    finally:
+        _system_info["checked"] = True
+
+
+def _start_gpu_probe():
+    if _system_probe_started.acquire(blocking=False):
+        threading.Thread(target=_probe_gpu, daemon=True).start()
 
 
 def _run_async(coro):
@@ -437,7 +472,18 @@ def _too_large(_exc):
 
 @app.route("/")
 def index():
+    _start_gpu_probe()
     return render_template("index.html", ffmpeg_available=FFMPEG_AVAILABLE)
+
+
+@app.route("/system")
+def system_info():
+    _start_gpu_probe()
+    return jsonify({
+        "ffmpeg": FFMPEG_AVAILABLE,
+        "gpu": _system_info["gpu"],
+        "checked": _system_info["checked"],
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +578,8 @@ def task_status(task_id: str):
     }
 
     if task["status"] == "processing":
+        if task.get("started_at"):
+            resp["elapsed_seconds"] = int(time.time() - task["started_at"])
         resp["step"] = task.get("step", 1)
         resp["steps"] = 2 if task["mode"] == "multitrack" else 1
         if task.get("eta_seconds") is not None:
@@ -622,6 +670,7 @@ def _do_identify(filepath: str):
                 )
             ),
             "cover_url": cover_url,
+            "shazam_url": track.get("url", ""),
         })
     except Exception as exc:
         return _error(f"Error al identificar: {exc}", 500)
@@ -659,6 +708,37 @@ def stream(filename: str):
     if fpath is None:
         return _error("Archivo no encontrado", 404)
     return send_from_directory(OUTPUT_DIR, fpath.name, conditional=True)
+
+
+PEAK_BINS = 1200
+
+
+@app.route("/peaks/<path:filename>")
+def peaks(filename: str):
+    """Waveform overview of a stem: the loudest sample in each of PEAK_BINS
+    slices. Cached next to the stem because decoding a long FLAC takes a moment."""
+    fpath = _resolve_in(OUTPUT_DIR, filename)
+    if fpath is None or fpath.suffix.lower() != ".flac":
+        return _error("Archivo no encontrado", 404)
+
+    cache = fpath.with_name(fpath.stem + ".peaks.json")
+    if cache.is_file():
+        return send_from_directory(OUTPUT_DIR, cache.name, mimetype="application/json")
+
+    import numpy as np  # lazy: only needed here
+    import soundfile as sf
+
+    info = sf.info(str(fpath))
+    per_bin = max(1, -(-info.frames // PEAK_BINS))  # ceil division
+    values = []
+    for block in sf.blocks(str(fpath), blocksize=per_bin, dtype="float32", always_2d=True):
+        values.append(round(float(np.abs(block).max()) if block.size else 0.0, 3))
+
+    data = {"duration": info.frames / info.samplerate, "peaks": values}
+    tmp = cache.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
+    tmp.replace(cache)
+    return jsonify(data)
 
 
 @app.route("/download-all/<task_id>")
@@ -704,5 +784,6 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
     _purge_old_files()
+    _start_gpu_probe()
     threading.Thread(target=_open_browser, daemon=True).start()
     app.run(host="127.0.0.1", port=5000, debug=False)

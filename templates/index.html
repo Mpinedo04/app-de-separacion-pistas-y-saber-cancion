@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
     <title>SoundForge — Herramientas de IA para Audio</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='.5' stop-color='%233b82f6'/%3E%3Cstop offset='1' stop-color='%23ec4899'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cg fill='white'%3E%3Crect x='7' y='12' width='3' height='8' rx='1.5'/%3E%3Crect x='12.5' y='7' width='3' height='18' rx='1.5'/%3E%3Crect x='18' y='10' width='3' height='12' rx='1.5'/%3E%3Crect x='23.5' y='13' width='3' height='6' rx='1.5'/%3E%3C/g%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -11,41 +13,37 @@
 </head>
 <body>
 
-    <!-- Animated Background -->
-    <div class="bg-animated">
-        <div class="orb"></div>
-        <div class="orb"></div>
-        <div class="orb"></div>
-        <div class="orb"></div>
+    <!-- Background: aurora blobs that pulse with the bass, grid and film grain -->
+    <div class="bg" aria-hidden="true">
+        <div class="aurora">
+            <span class="blob blob-1"></span>
+            <span class="blob blob-2"></span>
+            <span class="blob blob-3"></span>
+            <span class="blob blob-4"></span>
+        </div>
+        <div class="bg-grid"></div>
+        <div class="bg-grain"></div>
     </div>
 
-    <!-- Floating Music Notes -->
-    <div class="music-notes">
-        <span class="music-note">♪</span>
-        <span class="music-note">♫</span>
-        <span class="music-note">♬</span>
-        <span class="music-note">♩</span>
-        <span class="music-note">♪</span>
-        <span class="music-note">♫</span>
-        <span class="music-note">♬</span>
-        <span class="music-note">♩</span>
-        <span class="music-note">♪</span>
-        <span class="music-note">♫</span>
-    </div>
+    <canvas class="confetti" id="confettiCanvas" aria-hidden="true"></canvas>
 
-    <!-- Toast Container -->
-    <div class="toast-container" id="toastContainer"></div>
+    <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-    <!-- Main App -->
     <div class="app-container">
 
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <div class="logo-icon">🎵</div>
+                <div class="logo-icon" aria-hidden="true">
+                    <span class="logo-bar"></span><span class="logo-bar"></span><span class="logo-bar"></span><span class="logo-bar"></span><span class="logo-bar"></span>
+                </div>
                 <h1>SoundForge</h1>
             </div>
-            <p class="subtitle">Herramientas de IA para Audio</p>
+            <p class="subtitle">Herramientas de IA para audio</p>
+            <div class="system-chip" id="systemChip" data-state="checking">
+                <span class="system-dot"></span>
+                <span id="systemText">Comprobando hardware…</span>
+            </div>
         </header>
 
         {% if not ffmpeg_available %}
@@ -55,61 +53,72 @@
         </div>
         {% endif %}
 
-        <!-- Cards Grid -->
-        <div class="cards-grid">
+        <main class="cards-grid" id="cardsGrid">
 
             <!-- ═══════════════════════════════════════
                  CARD 1: SEPARAR PISTAS
                  ═══════════════════════════════════════ -->
-            <div class="glass-card" id="separateCard">
+            <section class="glass-card" id="separateCard" aria-labelledby="sepTitle">
                 <div class="loading-overlay" id="separateLoading">
-                    <div class="spinner-large"></div>
+                    <div class="upload-ring">
+                        <svg viewBox="0 0 100 100" aria-hidden="true">
+                            <circle class="ring-track" cx="50" cy="50" r="44"></circle>
+                            <circle class="ring-fill" id="sepUploadRing" cx="50" cy="50" r="44"></circle>
+                        </svg>
+                        <span class="upload-percent" id="sepUploadPercent">0%</span>
+                    </div>
                     <span class="loading-text">Subiendo archivo…</span>
                 </div>
 
                 <div class="card-header">
-                    <div class="card-icon separate">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--purple);">
-                            <line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>
+                    <div class="card-icon separate" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 12h2l2-6 3 12 3-9 2 5 2-2h6"></path>
                         </svg>
                     </div>
                     <div>
-                        <div class="card-title">Separar Pistas</div>
-                        <div class="card-description">Separa voces e instrumentales con IA</div>
+                        <h2 class="card-title" id="sepTitle">Separar pistas</h2>
+                        <p class="card-description">Voz, instrumentos y más, separados con IA</p>
                     </div>
                 </div>
 
                 <!-- Dropzone -->
-                <div class="dropzone" id="sepDropzone">
-                    <span class="dropzone-icon">🎶</span>
-                    <p class="dropzone-text">Arrastra y suelta tu archivo aquí o <strong>haz clic para buscar</strong></p>
-                    <p class="dropzone-hint">.mp4 .mp3 .wav .flac .ogg .m4a .aac .wma .webm</p>
-                    <input type="file" id="sepFileInput" accept=".mp4,.mp3,.wav,.flac,.ogg,.m4a,.aac,.wma,.webm">
+                <div class="dropzone" id="sepDropzone" role="button" tabindex="0" aria-label="Elegir archivo para separar">
+                    <div class="dropzone-visual" aria-hidden="true">
+                        <span class="dz-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                    </div>
+                    <p class="dropzone-text"><span class="dz-idle">Arrastra tu canción o vídeo aquí o <strong>haz clic para buscar</strong></span><span class="dz-drag">¡Suéltalo!</span></p>
+                    <p class="dropzone-hint"></p>
+                    <input type="file" id="sepFileInput">
                 </div>
 
                 <!-- File info -->
                 <div class="file-info" id="sepFileInfo">
-                    <span class="file-icon">📄</span>
+                    <span class="file-icon" aria-hidden="true">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                    </span>
                     <div class="file-details">
                         <div class="file-name" id="sepFileName"></div>
                         <div class="file-size" id="sepFileSize"></div>
                     </div>
-                    <button class="file-remove" id="sepFileRemove" title="Quitar archivo">✕</button>
+                    <button class="file-remove" id="sepFileRemove" title="Quitar archivo" aria-label="Quitar archivo">✕</button>
                 </div>
 
                 <!-- Mode -->
-                <div class="mode-picker" id="sepModePicker" role="radiogroup" aria-label="Tipo de separación">
+                <div class="mode-picker" id="sepModePicker" data-mode="vocals" role="radiogroup" aria-label="Tipo de separación">
+                    <span class="mode-indicator" aria-hidden="true"></span>
                     <button type="button" class="mode-option active" data-mode="vocals" role="radio" aria-checked="true">
                         <span class="mode-title">🎤 Voz + Instrumental</span>
                         <span class="mode-desc">2 pistas · la más rápida</span>
+                        <span class="mode-stems" aria-hidden="true"><i style="--c: var(--stem-vocals)"></i><i style="--c: var(--stem-instrumental)"></i></span>
                     </button>
                     <button type="button" class="mode-option" data-mode="multitrack" role="radio" aria-checked="false">
                         <span class="mode-title">🎛️ Multipista</span>
                         <span class="mode-desc">Voz, batería, bajo, guitarra, piano y otros</span>
+                        <span class="mode-stems" aria-hidden="true"><i style="--c: var(--stem-vocals)"></i><i style="--c: var(--stem-drums)"></i><i style="--c: var(--stem-bass)"></i><i style="--c: var(--stem-guitar)"></i><i style="--c: var(--stem-piano)"></i><i style="--c: var(--stem-other)"></i></span>
                     </button>
                 </div>
 
-                <!-- Separate Button -->
                 <button class="btn btn-primary" id="sepBtn" disabled>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><line x1="20" y1="4" x2="8.12" y2="15.88"></line><line x1="14.47" y1="14.48" x2="20" y2="20"></line><line x1="8.12" y1="8.12" x2="12" y2="12"></line>
@@ -117,113 +126,116 @@
                     Separar
                 </button>
 
-                <!-- Progress -->
+                <!-- Progress: the "forge" bars take each stem's colour as the song gets processed -->
                 <div class="progress-container" id="sepProgress">
-                    <div class="progress-label">
-                        <span class="progress-text">Separando pistas…</span>
+                    <div class="forge" id="sepForge" aria-hidden="true"></div>
+                    <div class="progress-head">
                         <span class="progress-percent" id="sepPercent">0%</span>
+                        <span class="device-chip" id="sepDevice" hidden></span>
                     </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="sepProgressFill"></div>
+                    <ol class="stepper" id="sepStepper" hidden>
+                        <li class="step" data-step="1"><span class="step-dot"></span>Voz</li>
+                        <li class="step-line" aria-hidden="true"><span></span></li>
+                        <li class="step" data-step="2"><span class="step-dot"></span>Instrumentos</li>
+                    </ol>
+                    <div class="progress-bar"><div class="progress-fill" id="sepProgressFill"></div></div>
+                    <div class="progress-label">
+                        <span class="progress-text" id="sepProgressText" role="status">Preparando…</span>
+                        <span class="progress-elapsed" id="sepElapsed"></span>
                     </div>
                 </div>
 
                 <!-- Results -->
                 <div class="results-container" id="sepResults">
-                    <div class="result-card mixer">
-                        <!-- Transport: one play/seek for all stems -->
+                    <div class="mixer" id="mixer">
+                        <canvas class="visualizer" id="mixerVisualizer" aria-hidden="true"></canvas>
+
                         <div class="mixer-transport">
                             <button type="button" class="mixer-play" id="mixerPlay" aria-label="Reproducir" disabled>
-                                <svg class="icon-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
-                                <svg class="icon-pause" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1"></rect><rect x="14" y="4" width="5" height="16" rx="1"></rect></svg>
+                                <svg class="icon-play" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"></path></svg>
+                                <svg class="icon-pause" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"></rect><rect x="14" y="4" width="5" height="16" rx="1.5"></rect></svg>
                             </button>
-                            <span class="mixer-time" id="mixerTime">0:00</span>
-                            <input type="range" class="mixer-seek" id="mixerSeek" min="0" max="0" step="0.01" value="0" aria-label="Posición" disabled>
-                            <span class="mixer-time" id="mixerDuration">0:00</span>
-                        </div>
-                        <div class="mixer-tracks" id="mixerTracks"></div>
-                        <p class="mixer-hint"><strong>M</strong> silencia una pista · <strong>S</strong> escucha solo esa</p>
-                    </div>
-
-                    <div class="result-card">
-                        <div class="result-actions">
-                            <a class="btn btn-download" id="downloadAll" href="#">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                                Descargar todo (ZIP)
-                            </a>
-                            <a class="btn btn-download hidden" id="downloadInstrumentalFull" href="#">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                                Instrumental completo
-                            </a>
-                            <button class="btn btn-identify-inline" id="identifyFromSep">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                                Identificar canción
-                            </button>
-                        </div>
-                        <!-- Inline identify result -->
-                        <div class="inline-identify" id="inlineIdentifyResult">
-                            <div class="song-card">
-                                <div class="song-cover" id="inlineSongCover">🎵</div>
-                                <div class="song-info">
-                                    <div class="song-title" id="inlineSongTitle"></div>
-                                    <div class="song-artist" id="inlineSongArtist"></div>
-                                    <div class="song-album" id="inlineSongAlbum"></div>
-                                    <div class="music-bars">
-                                        <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
-                                        <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
-                                    </div>
+                            <div class="mixer-timeline">
+                                <input type="range" class="mixer-seek" id="mixerSeek" min="0" max="0" step="0.01" value="0" aria-label="Posición" disabled>
+                                <div class="mixer-times">
+                                    <span class="mixer-time" id="mixerTime">0:00</span>
+                                    <span class="mixer-song" id="mixerSong"></span>
+                                    <span class="mixer-time" id="mixerDuration">0:00</span>
                                 </div>
                             </div>
                         </div>
+
+                        <div class="mixer-tracks" id="mixerTracks"></div>
+
+                        <p class="mixer-hint">
+                            <kbd>Espacio</kbd> play · <kbd>←</kbd><kbd>→</kbd> ±5 s · <kbd>1</kbd>–<kbd>6</kbd> silenciar · <kbd>Mayús</kbd>+<kbd>1</kbd>–<kbd>6</kbd> solo · clic en la onda para saltar
+                        </p>
                     </div>
+
+                    <div class="result-actions">
+                        <a class="btn btn-download" id="downloadAll" href="#">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            Descargar todo (ZIP)
+                        </a>
+                        <a class="btn btn-download hidden" id="downloadInstrumentalFull" href="#">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            Instrumental completo
+                        </a>
+                        <button class="btn btn-identify-inline" id="identifyFromSep">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            Identificar canción
+                        </button>
+                    </div>
+
+                    <div class="inline-identify" id="inlineIdentifyResult"></div>
                 </div>
 
-                <!-- Reset -->
                 <div class="section-reset" id="sepReset">
-                    <button onclick="resetSeparation()">↻ Nueva separación</button>
+                    <button type="button" id="sepResetBtn">↻ Nueva separación</button>
                 </div>
-            </div>
+            </section>
 
             <!-- ═══════════════════════════════════════
                  CARD 2: IDENTIFICAR CANCIÓN
                  ═══════════════════════════════════════ -->
-            <div class="glass-card" id="identifyCard">
+            <section class="glass-card" id="identifyCard" aria-labelledby="idTitle">
                 <div class="loading-overlay" id="identifyLoading">
-                    <div class="spinner-large"></div>
-                    <span class="loading-text">Subiendo archivo…</span>
+                    <div class="radar" aria-hidden="true"><span></span><span></span><span></span><i>🎧</i></div>
+                    <span class="loading-text">Escuchando…</span>
                 </div>
 
                 <div class="card-header">
-                    <div class="card-icon identify">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--blue);">
+                    <div class="card-icon identify" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                         </svg>
                     </div>
                     <div>
-                        <div class="card-title">Identificar Canción</div>
-                        <div class="card-description">Descubre qué canción está sonando</div>
+                        <h2 class="card-title" id="idTitle">Identificar canción</h2>
+                        <p class="card-description">Descubre qué canción está sonando</p>
                     </div>
                 </div>
 
-                <!-- Dropzone -->
-                <div class="dropzone" id="idDropzone">
-                    <span class="dropzone-icon">🔍</span>
-                    <p class="dropzone-text">Arrastra y suelta tu archivo aquí o <strong>haz clic para buscar</strong></p>
-                    <p class="dropzone-hint">.mp4 .mp3 .wav .flac .ogg .m4a .aac .wma .webm</p>
-                    <input type="file" id="idFileInput" accept=".mp4,.mp3,.wav,.flac,.ogg,.m4a,.aac,.wma,.webm">
+                <div class="dropzone" id="idDropzone" role="button" tabindex="0" aria-label="Elegir archivo para identificar">
+                    <div class="dropzone-visual" aria-hidden="true">
+                        <span class="dz-radar"><span></span><span></span><i>🔍</i></span>
+                    </div>
+                    <p class="dropzone-text"><span class="dz-idle">Arrastra un trozo de audio o <strong>haz clic para buscar</strong></span><span class="dz-drag">¡Suéltalo!</span></p>
+                    <p class="dropzone-hint"></p>
+                    <input type="file" id="idFileInput">
                 </div>
 
-                <!-- File info -->
                 <div class="file-info" id="idFileInfo">
-                    <span class="file-icon">📄</span>
+                    <span class="file-icon" aria-hidden="true">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                    </span>
                     <div class="file-details">
                         <div class="file-name" id="idFileName"></div>
                         <div class="file-size" id="idFileSize"></div>
                     </div>
-                    <button class="file-remove" id="idFileRemove" title="Quitar archivo">✕</button>
+                    <button class="file-remove" id="idFileRemove" title="Quitar archivo" aria-label="Quitar archivo">✕</button>
                 </div>
 
-                <!-- Identify Button -->
                 <button class="btn btn-primary" id="idBtn" disabled>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -231,37 +243,36 @@
                     Identificar
                 </button>
 
-                <!-- Identify Result -->
-                <div class="identify-result" id="idResult">
-                    <div class="song-card">
-                        <div class="song-cover" id="idSongCover">🎵</div>
-                        <div class="song-info">
-                            <div class="song-title" id="idSongTitle"></div>
-                            <div class="song-artist" id="idSongArtist"></div>
-                            <div class="song-album" id="idSongAlbum"></div>
-                            <div class="music-bars">
-                                <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
-                                <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div class="identify-result" id="idResult"></div>
 
-                <!-- Reset -->
                 <div class="section-reset" id="idReset">
-                    <button onclick="resetIdentify()">↻ Nueva identificación</button>
+                    <button type="button" id="idResetBtn">↻ Nueva identificación</button>
                 </div>
-            </div>
+            </section>
 
-        </div>
+        </main>
 
-        <!-- Footer -->
         <footer class="footer">
-            <p>Powered by <span class="powered-text">UVR AI & Shazam</span></p>
+            <p>Hecho con <span class="powered-text">BS-Roformer · Demucs · Shazam</span></p>
         </footer>
-
     </div>
 
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <template id="songCardTemplate">
+        <div class="song-card">
+            <div class="song-ambient"></div>
+            <div class="record">
+                <div class="vinyl"><span class="vinyl-label"></span></div>
+                <div class="song-cover">🎵</div>
+            </div>
+            <div class="song-info">
+                <div class="song-title"></div>
+                <div class="song-artist"></div>
+                <div class="song-album"></div>
+                <div class="song-links"></div>
+            </div>
+        </div>
+    </template>
+
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
